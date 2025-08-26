@@ -181,7 +181,7 @@ router.post('/:broadcastId/stop', asyncHandler(async (req: AuthenticatedRequest,
 
   // Get video ID from the completed broadcast
   let videoId = null;
-  if (updatedBroadcast.contentDetails?.recordingStatus === 'recorded') {
+  if (updatedBroadcast.status?.recordingStatus === 'recorded') {
     // The video ID is typically the same as the broadcast ID for YouTube Live
     videoId = broadcast.ytBroadcastId;
   }

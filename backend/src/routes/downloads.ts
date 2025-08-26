@@ -1,4 +1,4 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
 import { asyncHandler, createError } from '../middleware/errorHandler';
 import { VodAsset } from '../models/VodAsset';
@@ -52,8 +52,8 @@ router.post('/:videoId/request', asyncHandler(async (req: AuthenticatedRequest, 
         googleAccountId: googleAccount.id,
         videoId,
         title: videoInfo.snippet?.title || 'Unknown Video',
-        description: videoInfo.snippet?.description,
-        duration: this.parseDuration(videoInfo.contentDetails?.duration),
+        description: videoInfo.snippet?.description || undefined,
+        duration: parseDuration(videoInfo.contentDetails?.duration || undefined),
         format,
         quality,
         status: 'pending'
@@ -84,7 +84,7 @@ router.post('/:videoId/request', asyncHandler(async (req: AuthenticatedRequest, 
     await vodAsset.save();
 
     // Start background download and processing
-    this.processVideoDownload(vodAsset, googleAccount);
+    processVideoDownload(vodAsset, googleAccount);
   }
 
   res.json({
@@ -132,7 +132,7 @@ router.get('/:videoId/status', asyncHandler(async (req: AuthenticatedRequest, re
 }));
 
 // Download file (with signed URL)
-router.get('/file/:token', asyncHandler(async (req, res) => {
+router.get('/file/:token', asyncHandler(async (req: Request, res: Response) => {
   const { token } = req.params;
 
   try {

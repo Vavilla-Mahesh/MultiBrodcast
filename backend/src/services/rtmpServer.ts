@@ -81,10 +81,12 @@ export class RTMPServer {
       const streamKey = StreamPath.split('/').pop();
       if (!this.validateStreamKey(streamKey)) {
         console.log('[NodeEvent on prePublish] Unauthorized stream key:', streamKey);
-        // Reject the stream
+        // Reject the stream by closing the session
         const session = this.server?.getSession(id);
-        if (session) {
-          session.reject();
+        if (session && typeof (session as any).reject === 'function') {
+          (session as any).reject();
+        } else if (session && typeof (session as any).close === 'function') {
+          (session as any).close();
         }
       }
     });
