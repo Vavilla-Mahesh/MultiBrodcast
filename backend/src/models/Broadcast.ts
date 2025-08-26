@@ -111,7 +111,7 @@ export class Broadcast extends Model<BroadcastAttributes> implements BroadcastAt
           allowNull: true,
         },
         tags: {
-          type: DataTypes.ARRAY(DataTypes.STRING),
+          type: DataTypes.JSON,
           allowNull: true,
           defaultValue: [],
         },

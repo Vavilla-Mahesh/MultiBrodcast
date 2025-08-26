@@ -1,8 +1,11 @@
 import NodeMediaServer from 'node-media-server';
 import { createError } from '../middleware/errorHandler';
+import { Broadcast } from '../models/Broadcast';
+import { spawn, ChildProcess } from 'child_process';
 
 export class RTMPServer {
   private server: NodeMediaServer | null = null;
+  private relayProcesses: Map<string, ChildProcess> = new Map();
   private isRunning: boolean = false;
 
   constructor() {
@@ -74,12 +77,13 @@ export class RTMPServer {
       console.log('[NodeEvent on doneConnect]', `id=${id} args=${JSON.stringify(args)}`);
     });
 
-    this.server.on('prePublish', (id: string, StreamPath: string, args: any) => {
+    this.server.on('prePublish', async (id: string, StreamPath: string, args: any) => {
       console.log('[NodeEvent on prePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
       
       // Validate stream key here
       const streamKey = StreamPath.split('/').pop();
-      if (!this.validateStreamKey(streamKey)) {
+      const isValid = await this.validateStreamKey(streamKey);
+      if (!isValid) {
         console.log('[NodeEvent on prePublish] Unauthorized stream key:', streamKey);
         // Reject the stream by closing the session
         const session = this.server?.getSession(id);
@@ -118,35 +122,97 @@ export class RTMPServer {
     });
   }
 
-  private validateStreamKey(streamKey: string | undefined): boolean {
+  private async validateStreamKey(streamKey: string | undefined): Promise<boolean> {
     if (!streamKey) return false;
     
-    // TODO: Implement proper stream key validation against database
-    // For now, accept any non-empty stream key
-    return streamKey.length > 0;
+    try {
+      // Check if stream key exists in the database
+      const broadcast = await Broadcast.findOne({
+        where: {
+          streamKey: streamKey,
+          status: { $in: ['created', 'ready', 'testing'] }
+        }
+      });
+      
+      return !!broadcast;
+    } catch (error) {
+      console.error('Error validating stream key:', error);
+      // Fallback: accept any non-empty stream key for development
+      return streamKey.length > 0;
+    }
   }
 
-  private startRelay(streamPath: string): void {
+  private async startRelay(streamPath: string): Promise<void> {
     console.log('Starting relay for stream:', streamPath);
-    
-    // TODO: Implement FFmpeg relay to YouTube RTMP endpoint
-    // This would read from the local RTMP stream and forward to YouTube
     
     const streamKey = streamPath.split('/').pop();
     if (!streamKey) return;
 
-    // Example relay command (would be implemented with child_process or fluent-ffmpeg)
-    // ffmpeg -i rtmp://localhost:1935/live/${streamKey} -c copy -f flv rtmp://a.rtmp.youtube.com/live2/${youtubeStreamKey}
+    try {
+      // Get broadcast info for this stream key
+      const broadcast = await Broadcast.findOne({
+        where: { streamKey: streamKey },
+        include: ['googleAccount']
+      });
+
+      if (!broadcast || !broadcast.ingestionAddress) {
+        console.error('No broadcast found or missing ingestion address for stream key:', streamKey);
+        return;
+      }
+
+      // Build FFmpeg command to relay stream to YouTube
+      const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+      const inputUrl = `rtmp://localhost:${process.env.RTMP_PORT || '1935'}${streamPath}`;
+      const outputUrl = `${broadcast.ingestionAddress}/${streamKey}`;
+
+      const ffmpegArgs = [
+        '-i', inputUrl,
+        '-c', 'copy',                    // Copy codecs without re-encoding
+        '-f', 'flv',                     // Output format for RTMP
+        '-flvflags', 'no_duration_filesize',
+        outputUrl
+      ];
+
+      console.log('Starting FFmpeg relay:', ffmpegPath, ffmpegArgs.join(' '));
+
+      const relayProcess = spawn(ffmpegPath, ffmpegArgs);
+      this.relayProcesses.set(streamKey, relayProcess);
+
+      relayProcess.stdout?.on('data', (data) => {
+        console.log(`FFmpeg stdout (${streamKey}):`, data.toString());
+      });
+
+      relayProcess.stderr?.on('data', (data) => {
+        console.log(`FFmpeg stderr (${streamKey}):`, data.toString());
+      });
+
+      relayProcess.on('close', (code) => {
+        console.log(`FFmpeg relay process (${streamKey}) exited with code ${code}`);
+        this.relayProcesses.delete(streamKey);
+      });
+
+      relayProcess.on('error', (error) => {
+        console.error(`FFmpeg relay error (${streamKey}):`, error);
+        this.relayProcesses.delete(streamKey);
+      });
+
+    } catch (error) {
+      console.error('Error starting relay for stream:', streamKey, error);
+    }
   }
 
   private stopRelay(streamPath: string): void {
     console.log('Stopping relay for stream:', streamPath);
     
-    // TODO: Implement stopping the FFmpeg relay process
     const streamKey = streamPath.split('/').pop();
     if (!streamKey) return;
 
-    // Stop the relay process for this stream key
+    const relayProcess = this.relayProcesses.get(streamKey);
+    if (relayProcess) {
+      console.log('Terminating FFmpeg relay process for stream:', streamKey);
+      relayProcess.kill('SIGTERM');
+      this.relayProcesses.delete(streamKey);
+    }
   }
 
   public getStats(): any {
@@ -159,7 +225,6 @@ export class RTMPServer {
   }
 
   public getActiveStreams(): string[] {
-    // TODO: Implement getting list of active streams
-    return [];
+    return Array.from(this.relayProcesses.keys());
   }
 }

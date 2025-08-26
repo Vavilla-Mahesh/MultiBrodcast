@@ -6,6 +6,7 @@ import { Op } from 'sequelize';
 export class FileCleanupService {
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
+  private lastCleanup: Date | null = null;
 
   public start(): void {
     if (this.isRunning) {
@@ -43,6 +44,7 @@ export class FileCleanupService {
       await this.cleanupOrphanedFiles();
       await this.logDiskUsage();
 
+      this.lastCleanup = new Date();
       console.log('File cleanup process completed');
     } catch (error) {
       console.error('Error during file cleanup:', error);
@@ -217,8 +219,8 @@ export class FileCleanupService {
 
   public getStatus(): { isRunning: boolean; lastCleanup?: Date } {
     return {
-      isRunning: this.isRunning
-      // Add lastCleanup timestamp if needed
+      isRunning: this.isRunning,
+      lastCleanup: this.lastCleanup || undefined
     };
   }
 }

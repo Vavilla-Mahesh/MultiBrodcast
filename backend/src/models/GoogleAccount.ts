@@ -62,7 +62,7 @@ export class GoogleAccount extends Model<GoogleAccountAttributes> implements Goo
           allowNull: false,
         },
         scopes: {
-          type: DataTypes.ARRAY(DataTypes.STRING),
+          type: DataTypes.JSON,
           allowNull: false,
           defaultValue: [],
         },

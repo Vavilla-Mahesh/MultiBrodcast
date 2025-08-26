@@ -6,6 +6,7 @@ import { Broadcast } from '../models/Broadcast';
 import { GoogleAccount } from '../models/GoogleAccount';
 import { VodAsset } from '../models/VodAsset';
 import { Retelecast } from '../models/Retelecast';
+import { spawn } from 'child_process';
 
 const router = Router();
 
@@ -327,9 +328,8 @@ router.post('/:videoId/retelecast', asyncHandler(async (req: AuthenticatedReques
     loopCount
   });
 
-  // TODO: Start FFmpeg process to stream the VOD to the new broadcast
-  // This would involve downloading the VOD if not already cached,
-  // then streaming it via FFmpeg to the YouTube RTMP endpoint
+  // Start FFmpeg process to stream the VOD to the new broadcast
+  startRetelecastStream(retelecast, vodAsset, dbBroadcast);
 
   res.status(201).json({
     success: true,
@@ -343,5 +343,88 @@ router.post('/:videoId/retelecast', asyncHandler(async (req: AuthenticatedReques
     }
   });
 }));
+
+// Function to start retelecast streaming
+async function startRetelecastStream(retelecast: Retelecast, vodAsset: VodAsset, broadcast: Broadcast): Promise<void> {
+  try {
+    if (!vodAsset.storageUrl || !broadcast.ingestionAddress) {
+      throw new Error('Missing required file or ingestion address');
+    }
+
+    // Update retelecast status
+    retelecast.status = 'starting';
+    retelecast.startedAt = new Date();
+    await retelecast.save();
+
+    const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+    const outputUrl = `${broadcast.ingestionAddress}/${broadcast.streamKey}`;
+    
+    const ffmpegArgs = [
+      '-re',                          // Read input at its native frame rate
+      '-stream_loop', (retelecast.loopCount || 1).toString(), // Loop the video
+      '-i', vodAsset.storageUrl,      // Input file
+      '-c', 'copy',                   // Copy without re-encoding
+      '-f', 'flv',                    // Output format for RTMP
+      '-flvflags', 'no_duration_filesize',
+      outputUrl
+    ];
+
+    console.log('Starting retelecast FFmpeg process:', ffmpegPath, ffmpegArgs.join(' '));
+
+    const ffmpegProcess = spawn(ffmpegPath, ffmpegArgs);
+
+    ffmpegProcess.stdout?.on('data', (data) => {
+      console.log(`Retelecast FFmpeg stdout (${retelecast.id}):`, data.toString());
+    });
+
+    ffmpegProcess.stderr?.on('data', (data) => {
+      console.log(`Retelecast FFmpeg stderr (${retelecast.id}):`, data.toString());
+    });
+
+    ffmpegProcess.on('close', async (code) => {
+      console.log(`Retelecast FFmpeg process (${retelecast.id}) exited with code ${code}`);
+      
+      try {
+        retelecast.status = code === 0 ? 'completed' : 'error';
+        retelecast.endedAt = new Date();
+        if (code !== 0) {
+          retelecast.errorMessage = `FFmpeg process exited with code ${code}`;
+        }
+        await retelecast.save();
+      } catch (error) {
+        console.error('Error updating retelecast status:', error);
+      }
+    });
+
+    ffmpegProcess.on('error', async (error) => {
+      console.error(`Retelecast FFmpeg error (${retelecast.id}):`, error);
+      
+      try {
+        retelecast.status = 'error';
+        retelecast.endedAt = new Date();
+        retelecast.errorMessage = error.message;
+        await retelecast.save();
+      } catch (saveError) {
+        console.error('Error saving retelecast error:', saveError);
+      }
+    });
+
+    // Update status to streaming after successful start
+    setTimeout(async () => {
+      try {
+        retelecast.status = 'streaming';
+        await retelecast.save();
+      } catch (error) {
+        console.error('Error updating retelecast to streaming:', error);
+      }
+    }, 5000);
+
+  } catch (error) {
+    console.error('Error starting retelecast stream:', error);
+    retelecast.status = 'error';
+    retelecast.errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    await retelecast.save();
+  }
+}
 
 export { router as streamRoutes };
