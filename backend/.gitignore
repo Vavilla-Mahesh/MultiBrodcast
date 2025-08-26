@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+*.temp
+media/downloads/*
+media/uploads/*
+media/temp/*
+!media/downloads/.gitkeep
+!media/uploads/.gitkeep
+!media/temp/.gitkeep

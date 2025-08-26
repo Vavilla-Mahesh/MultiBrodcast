@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "email": "admin@multibroadcast.com",
+      "password": "admin123",
+      "role": "admin"
+    },
+    {
+      "email": "user@multibroadcast.com",
+      "password": "user123",
+      "role": "user"
+    },
+    {
+      "email": "streamer@multibroadcast.com",
+      "password": "stream123",
+      "role": "user"
+    }
+  ]
+}
