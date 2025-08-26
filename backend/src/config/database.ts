@@ -10,21 +10,33 @@ export class Database {
 
   public static getInstance(): Sequelize {
     if (!Database.instance) {
-      Database.instance = new Sequelize({
-        database: process.env.DB_NAME || 'multibroadcast',
-        username: process.env.DB_USER || 'postgres',
-        password: process.env.DB_PASSWORD || 'postgres',
-        host: process.env.DB_HOST || 'localhost',
-        port: parseInt(process.env.DB_PORT || '5432'),
-        dialect: 'postgres',
-        logging: process.env.NODE_ENV === 'development' ? console.log : false,
-        pool: {
-          max: 5,
-          min: 0,
-          acquire: 30000,
-          idle: 10000
-        }
-      });
+      const isDevelopment = process.env.NODE_ENV === 'development';
+      
+      if (isDevelopment) {
+        // Use SQLite for development
+        Database.instance = new Sequelize({
+          dialect: 'sqlite',
+          storage: './dev-database.sqlite',
+          logging: console.log,
+        });
+      } else {
+        // Use PostgreSQL for production
+        Database.instance = new Sequelize({
+          database: process.env.DB_NAME || 'multibroadcast',
+          username: process.env.DB_USER || 'postgres',
+          password: process.env.DB_PASSWORD || 'postgres',
+          host: process.env.DB_HOST || 'localhost',
+          port: parseInt(process.env.DB_PORT || '5432'),
+          dialect: 'postgres',
+          logging: false,
+          pool: {
+            max: 5,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
+          }
+        });
+      }
     }
     return Database.instance;
   }

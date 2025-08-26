@@ -7,6 +7,8 @@ dist/
 .idea/
 *.tmp
 *.temp
+*.sqlite
+*.db
 media/downloads/*
 media/uploads/*
 media/temp/*

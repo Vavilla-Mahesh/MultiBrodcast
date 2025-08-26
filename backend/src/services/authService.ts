@@ -92,15 +92,15 @@ export class AuthService {
       throw createError('JWT secret not configured', 500);
     }
 
-    return jwt.sign(
+    const token = jwt.sign(
       { userId },
-      jwtSecret,
+      jwtSecret as string,
       { 
-        expiresIn: process.env.JWT_EXPIRES_IN || '24h',
-        issuer: 'multibroadcast-backend',
-        audience: 'multibroadcast-app'
-      }
+        expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+      } as jwt.SignOptions
     );
+    
+    return token;
   }
 
   public static async storeGoogleTokens(

@@ -1,4 +1,5 @@
 import { DataTypes, Model, Sequelize } from 'sequelize';
+import { GoogleAccount } from './GoogleAccount';
 
 export interface BroadcastAttributes {
   id?: number;
@@ -44,6 +45,9 @@ export class Broadcast extends Model<BroadcastAttributes> implements BroadcastAt
   public viewerCount?: number;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
+
+  // Association
+  public googleAccount?: GoogleAccount;
 
   public static initModel(sequelize: Sequelize): void {
     Broadcast.init(
@@ -107,7 +111,7 @@ export class Broadcast extends Model<BroadcastAttributes> implements BroadcastAt
           allowNull: true,
         },
         tags: {
-          type: DataTypes.ARRAY(DataTypes.STRING),
+          type: DataTypes.JSON,
           allowNull: true,
           defaultValue: [],
         },
