@@ -275,6 +275,25 @@ class AuthService extends StateNotifier<AuthState> {
     await prefs.remove('google_account');
   }
 
+  Future<void> disconnectYouTube() async {
+    try {
+      // Clear Google account data
+      state = state.copyWith(
+        googleAccount: null,
+        step2Complete: false,
+      );
+      
+      // Remove from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('google_account');
+      
+      // TODO: Call backend to revoke tokens and delete account record
+      
+    } catch (e) {
+      state = state.copyWith(error: 'Disconnect error: $e');
+    }
+  }
+
   void clearError() {
     state = state.copyWith(error: null);
   }

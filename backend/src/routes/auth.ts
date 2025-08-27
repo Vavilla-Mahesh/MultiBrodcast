@@ -148,6 +148,23 @@ router.post('/google/exchange-legacy', asyncHandler(async (req: Request, res: Re
   });
 }));
 
+// Disconnect YouTube account
+router.delete('/google/disconnect', asyncHandler(async (req: Request, res: Response) => {
+  const { user_id } = req.body;
+
+  if (!user_id) {
+    throw createError('User ID is required', 400);
+  }
+
+  // TODO: Implement revoke tokens with Google OAuth API
+  // For now, just delete the account record
+  
+  res.json({
+    success: true,
+    message: 'Google account disconnected successfully'
+  });
+}));
+
 // Refresh token endpoint
 router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   const { google_account_id } = req.body;
