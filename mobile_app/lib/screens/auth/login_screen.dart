@@ -105,7 +105,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _simulateGoogleOAuth();
+              _startGoogleOAuth(); // Use real OAuth instead of demo
             },
             child: const Text('Connect YouTube'),
           ),
@@ -114,9 +114,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  // Simulate Google OAuth for demo purposes
-  // In a real app, this would use google_sign_in package
-  Future<void> _simulateGoogleOAuth() async {
+  // Real Google OAuth for production
+  Future<void> _startGoogleOAuth() async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -126,40 +125,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           children: [
             CircularProgressIndicator(),
             SizedBox(height: 16),
-            Text('Connecting to YouTube...'),
+            Text('Opening Google OAuth...'),
           ],
         ),
       ),
     );
 
-    // Simulate OAuth delay
-    await Future.delayed(const Duration(seconds: 2));
-
-    final success = await ref.read(authServiceProvider.notifier).exchangeGoogleTokens(
-      accessToken: 'demo_access_token',
-      refreshToken: 'demo_refresh_token',
-      expiryDate: DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch,
-      channelId: 'UC_demo_channel_id',
-      channelTitle: 'Demo YouTube Channel',
-      scopes: [
-        'https://www.googleapis.com/auth/youtube',
-        'https://www.googleapis.com/auth/youtube.force-ssl',
-      ],
-    );
-
+    final success = await ref.read(authServiceProvider.notifier).startGoogleOAuth();
+    
     Navigator.of(context).pop(); // Close loading dialog
 
-    if (success) {
-      context.go('/home');
-    } else {
+    if (!success) {
       final error = ref.read(authServiceProvider).error;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error ?? 'Failed to connect YouTube account'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
+    // If successful, the browser will open and user will complete OAuth flow
+    // The app should handle the callback URL to complete the process
   }
 
   @override

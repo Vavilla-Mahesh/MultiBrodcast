@@ -10,17 +10,23 @@ export class Database {
 
   public static getInstance(): Sequelize {
     if (!Database.instance) {
-      const isDevelopment = process.env.NODE_ENV === 'development';
+      // Use PostgreSQL exclusively
+      const databaseUrl = process.env.DATABASE_URL;
       
-      if (isDevelopment) {
-        // Use SQLite for development
-        Database.instance = new Sequelize({
-          dialect: 'sqlite',
-          storage: './dev-database.sqlite',
-          logging: console.log,
+      if (databaseUrl) {
+        // Use DATABASE_URL if provided (production)
+        Database.instance = new Sequelize(databaseUrl, {
+          dialect: 'postgres',
+          logging: process.env.NODE_ENV === 'development' ? console.log : false,
+          pool: {
+            max: 5,
+            min: 0,
+            acquire: 30000,
+            idle: 10000
+          }
         });
       } else {
-        // Use PostgreSQL for production
+        // Use individual environment variables (development)
         Database.instance = new Sequelize({
           database: process.env.DB_NAME || 'multibroadcast',
           username: process.env.DB_USER || 'postgres',
@@ -28,7 +34,7 @@ export class Database {
           host: process.env.DB_HOST || 'localhost',
           port: parseInt(process.env.DB_PORT || '5432'),
           dialect: 'postgres',
-          logging: false,
+          logging: process.env.NODE_ENV === 'development' ? console.log : false,
           pool: {
             max: 5,
             min: 0,
