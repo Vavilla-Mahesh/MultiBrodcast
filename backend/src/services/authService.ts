@@ -5,6 +5,8 @@ import { GoogleAccount } from '../models/GoogleAccount';
 import { createError } from '../middleware/errorHandler';
 import fs from 'fs';
 import path from 'path';
+import fetch from 'node-fetch';
+import { google } from 'googleapis';
 
 interface LocalAuthConfig {
   users: Array<{
@@ -152,11 +154,130 @@ export class AuthService {
     return googleAccount;
   }
 
+  public static async exchangeGoogleAuthCode(
+    code: string,
+    codeVerifier: string,
+    userId: number
+  ): Promise<{ googleAccount: GoogleAccount }> {
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI;
+
+    if (!clientId || !clientSecret || !redirectUri) {
+      throw createError('Google OAuth configuration missing', 500);
+    }
+
+    // Exchange authorization code for tokens
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        code_verifier: codeVerifier,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.json();
+      console.error('Google token exchange error:', error);
+      throw createError(`Google OAuth token exchange failed: ${error.error_description || error.error}`, 400);
+    }
+
+    const tokens = await tokenResponse.json();
+    const { access_token, refresh_token, expires_in } = tokens;
+
+    // Get user's YouTube channel info
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    oauth2Client.setCredentials({ access_token, refresh_token });
+
+    const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+    
+    try {
+      const channelResponse = await youtube.channels.list({
+        part: ['snippet'],
+        mine: true,
+      });
+
+      const channel = channelResponse.data.items?.[0];
+      if (!channel) {
+        throw createError('No YouTube channel found for this account', 400);
+      }
+
+      const channelInfo = {
+        id: channel.id!,
+        title: channel.snippet?.title || 'Unknown Channel',
+      };
+
+      const scopes = process.env.GOOGLE_OAUTH_SCOPES?.split(' ') || [];
+      const expiryDate = expires_in ? Date.now() + (expires_in * 1000) : undefined;
+
+      const googleAccount = await this.storeGoogleTokens(
+        userId,
+        { access_token, refresh_token, expiry_date: expiryDate },
+        channelInfo,
+        scopes
+      );
+
+      return { googleAccount };
+    } catch (error) {
+      console.error('YouTube API error:', error);
+      throw createError('Failed to get YouTube channel information', 500);
+    }
+  }
+
   public static async refreshGoogleToken(googleAccount: GoogleAccount): Promise<GoogleAccount> {
-    // This would integrate with Google OAuth2 to refresh the token
-    // For now, we'll just extend the expiry time
-    googleAccount.expiresAt = new Date(Date.now() + 3600000);
-    await googleAccount.save();
-    return googleAccount;
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw createError('Google OAuth configuration missing', 500);
+    }
+
+    if (!googleAccount.refreshToken) {
+      throw createError('No refresh token available', 400);
+    }
+
+    try {
+      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+          refresh_token: googleAccount.refreshToken,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const error = await tokenResponse.json();
+        console.error('Google token refresh error:', error);
+        throw createError(`Google OAuth token refresh failed: ${error.error_description || error.error}`, 400);
+      }
+
+      const tokens = await tokenResponse.json();
+      const { access_token, refresh_token, expires_in } = tokens;
+
+      // Update the account with new tokens
+      googleAccount.accessToken = access_token;
+      if (refresh_token) {
+        googleAccount.refreshToken = refresh_token;
+      }
+      googleAccount.expiresAt = new Date(Date.now() + (expires_in * 1000));
+      await googleAccount.save();
+
+      return googleAccount;
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      throw createError('Failed to refresh Google OAuth token', 500);
+    }
   }
 }

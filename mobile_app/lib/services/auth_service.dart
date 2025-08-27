@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:crypto/crypto.dart';
 import 'dart:convert';
+import 'dart:math';
 
 class AuthService extends StateNotifier<AuthState> {
   AuthService() : super(AuthState());
@@ -71,6 +74,160 @@ class AuthService extends StateNotifier<AuthState> {
   }) async {
     try {
       final response = await http.post(
+        Uri.parse('$baseUrl/auth/google/exchange-legacy'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'access_token': accessToken,
+          'refresh_token': refreshToken,
+          'expiry_date': expiryDate,
+          'channel_id': channelId,
+          'channel_title': channelTitle,
+          'scopes': scopes ?? [],
+          'user_id': state.user?.id,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final googleAccount = GoogleAccount.fromJson(data['data']['googleAccount']);
+        
+        state = state.copyWith(
+          googleAccount: googleAccount,
+          step2Complete: true,
+        );
+        
+        // Save Google account data
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('google_account', jsonEncode(googleAccount.toJson()));
+        
+        return true;
+      } else {
+        final error = jsonDecode(response.body);
+        state = state.copyWith(error: error['error']['message']);
+        return false;
+      }
+    } catch (e) {
+      state = state.copyWith(error: 'Network error: $e');
+      return false;
+    }
+  }
+
+  String _generateCodeVerifier() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    final random = Random.secure();
+    return List.generate(128, (i) => chars[random.nextInt(chars.length)]).join();
+  }
+
+  String _generateCodeChallenge(String codeVerifier) {
+    final bytes = utf8.encode(codeVerifier);
+    final digest = sha256.convert(bytes);
+    return base64Url.encode(digest.bytes).replaceAll('=', '');
+  }
+
+  Future<bool> startGoogleOAuth() async {
+    try {
+      // Generate PKCE parameters
+      final codeVerifier = _generateCodeVerifier();
+      final codeChallenge = _generateCodeChallenge(codeVerifier);
+      
+      // Save code verifier for later use
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('oauth_code_verifier', codeVerifier);
+
+      // Get OAuth URL from backend
+      final response = await http.get(
+        Uri.parse('$baseUrl/auth/google/auth'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final authUrl = data['data']['authUrl'] as String;
+        
+        // Replace the code_challenge in the URL with our own
+        final uri = Uri.parse(authUrl);
+        final newParams = Map<String, String>.from(uri.queryParameters);
+        newParams['code_challenge'] = codeChallenge;
+        
+        final newUri = uri.replace(queryParameters: newParams);
+        
+        // Launch the OAuth URL
+        if (await canLaunchUrl(newUri)) {
+          return await launchUrl(
+            newUri,
+            mode: LaunchMode.externalApplication,
+          );
+        } else {
+          state = state.copyWith(error: 'Could not launch OAuth URL');
+          return false;
+        }
+      } else {
+        final error = jsonDecode(response.body);
+        state = state.copyWith(error: error['error']['message'] ?? 'Failed to get OAuth URL');
+        return false;
+      }
+    } catch (e) {
+      state = state.copyWith(error: 'OAuth error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> exchangeAuthorizationCode(String code) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final codeVerifier = prefs.getString('oauth_code_verifier');
+      
+      if (codeVerifier == null) {
+        state = state.copyWith(error: 'OAuth code verifier not found');
+        return false;
+      }
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/google/exchange'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'code': code,
+          'code_verifier': codeVerifier,
+          'user_id': state.user?.id,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final googleAccount = GoogleAccount.fromJson(data['data']['googleAccount']);
+        
+        state = state.copyWith(
+          googleAccount: googleAccount,
+          step2Complete: true,
+        );
+        
+        // Save Google account data and clean up OAuth state
+        await prefs.setString('google_account', jsonEncode(googleAccount.toJson()));
+        await prefs.remove('oauth_code_verifier');
+        
+        return true;
+      } else {
+        final error = jsonDecode(response.body);
+        state = state.copyWith(error: error['error']['message'] ?? 'Failed to exchange code');
+        return false;
+      }
+    } catch (e) {
+      state = state.copyWith(error: 'Code exchange error: $e');
+      return false;
+    }
+  }
+
+  // Legacy method for demo purposes - now just redirects to real OAuth
+  Future<bool> exchangeGoogleTokens({
+    required String accessToken,
+    String? refreshToken,
+    int? expiryDate,
+    required String channelId,
+    required String channelTitle,
+    List<String>? scopes,
+  }) async {
+    try {
+      final response = await http.post(
         Uri.parse('$baseUrl/auth/google/exchange'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -116,6 +273,25 @@ class AuthService extends StateNotifier<AuthState> {
     await prefs.remove('auth_token');
     await prefs.remove('user_data');
     await prefs.remove('google_account');
+  }
+
+  Future<void> disconnectYouTube() async {
+    try {
+      // Clear Google account data
+      state = state.copyWith(
+        googleAccount: null,
+        step2Complete: false,
+      );
+      
+      // Remove from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('google_account');
+      
+      // TODO: Call backend to revoke tokens and delete account record
+      
+    } catch (e) {
+      state = state.copyWith(error: 'Disconnect error: $e');
+    }
   }
 
   void clearError() {

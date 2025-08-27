@@ -73,36 +73,52 @@ class HomeScreen extends ConsumerWidget {
                   _ActionCard(
                     icon: Icons.schedule,
                     title: 'Schedule Stream',
-                    subtitle: 'Plan your next live broadcast',
-                    onTap: () => context.go('/home/schedule'),
+                    subtitle: authState.googleAccount != null 
+                      ? 'Plan your next live broadcast'
+                      : 'Connect YouTube to enable',
+                    onTap: authState.googleAccount != null 
+                      ? () => context.go('/home/schedule')
+                      : () => _showConnectPrompt(context, ref),
+                    enabled: authState.googleAccount != null,
                   ),
                   _ActionCard(
                     icon: Icons.live_tv,
                     title: 'Active Streams',
-                    subtitle: 'Manage ongoing broadcasts',
-                    onTap: () {
-                      // TODO: Navigate to active streams
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Active streams view coming soon')),
-                      );
-                    },
+                    subtitle: authState.googleAccount != null
+                      ? 'Manage ongoing broadcasts'
+                      : 'Connect YouTube to enable',
+                    onTap: authState.googleAccount != null 
+                      ? () {
+                          // TODO: Navigate to active streams
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Active streams view coming soon')),
+                          );
+                        }
+                      : () => _showConnectPrompt(context, ref),
+                    enabled: authState.googleAccount != null,
                   ),
                   _ActionCard(
                     icon: Icons.replay,
                     title: 'Re-telecast',
-                    subtitle: 'Replay previous streams',
-                    onTap: () {
-                      // TODO: Navigate to re-telecast
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Re-telecast feature coming soon')),
-                      );
-                    },
+                    subtitle: authState.googleAccount != null
+                      ? 'Replay previous streams'
+                      : 'Connect YouTube to enable',
+                    onTap: authState.googleAccount != null 
+                      ? () {
+                          // TODO: Navigate to re-telecast
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Re-telecast feature coming soon')),
+                          );
+                        }
+                      : () => _showConnectPrompt(context, ref),
+                    enabled: authState.googleAccount != null,
                   ),
                   _ActionCard(
-                    icon: Icons.download,
-                    title: 'Downloads',
-                    subtitle: 'Manage video downloads',
-                    onTap: () => context.go('/home/downloads'),
+                    icon: Icons.settings,
+                    title: 'Settings',
+                    subtitle: 'Manage YouTube connection',
+                    onTap: () => context.go('/settings'),
+                    enabled: true,
                   ),
                 ],
               ),
@@ -110,10 +126,43 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.go('/home/schedule'),
-        icon: const Icon(Icons.add),
-        label: const Text('New Stream'),
+      floatingActionButton: authState.googleAccount != null 
+        ? FloatingActionButton.extended(
+            onPressed: () => context.go('/home/schedule'),
+            icon: const Icon(Icons.add),
+            label: const Text('New Stream'),
+          )
+        : FloatingActionButton.extended(
+            onPressed: () => _showConnectPrompt(context, ref),
+            icon: const Icon(Icons.link),
+            label: const Text('Connect YouTube'),
+            backgroundColor: Colors.orange,
+          ),
+    );
+  }
+
+  void _showConnectPrompt(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('YouTube Connection Required'),
+        content: const Text(
+          'You need to connect your YouTube account to access streaming features. '
+          'Go to Settings to connect your account.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              context.go('/settings');
+            },
+            child: const Text('Go to Settings'),
+          ),
+        ],
       ),
     );
   }
@@ -124,49 +173,55 @@ class _ActionCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final bool enabled;
 
   const _ActionCard({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       child: InkWell(
-        onTap: onTap,
+        onTap: enabled ? onTap : null,
         borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 48,
-                color: Colors.red,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+        child: Opacity(
+          opacity: enabled ? 1.0 : 0.6,
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 48,
+                  color: enabled ? Colors.red : Colors.grey,
                 ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey,
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: enabled ? null : Colors.grey,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: enabled ? Colors.grey : Colors.grey[400],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
           ),
         ),
       ),
