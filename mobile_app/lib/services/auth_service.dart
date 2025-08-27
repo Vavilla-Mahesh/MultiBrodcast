@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'dart:convert';
 
 class AuthService extends StateNotifier<AuthState> {
@@ -8,16 +9,37 @@ class AuthService extends StateNotifier<AuthState> {
 
   static const String baseUrl = 'http://localhost:3000/api';
   
+  // Google Sign In instance for OAuth management
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: [
+      'https://www.googleapis.com/auth/youtube',
+      'https://www.googleapis.com/auth/youtube.force-ssl',
+    ],
+  );
+  
   bool get isAuthenticated => state.token != null && state.user != null;
 
   Future<void> loadSavedAuth() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     final userJson = prefs.getString('user_data');
+    final googleAccountJson = prefs.getString('google_account');
     
     if (token != null && userJson != null) {
       final user = User.fromJson(jsonDecode(userJson));
-      state = state.copyWith(token: token, user: user);
+      GoogleAccount? googleAccount;
+      
+      if (googleAccountJson != null) {
+        googleAccount = GoogleAccount.fromJson(jsonDecode(googleAccountJson));
+      }
+      
+      state = state.copyWith(
+        token: token, 
+        user: user,
+        googleAccount: googleAccount,
+        step1Complete: true,
+        step2Complete: googleAccount != null,
+      );
     }
   }
 
@@ -110,6 +132,13 @@ class AuthService extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
+    try {
+      // Sign out from Google if signed in
+      await _googleSignIn.signOut();
+    } catch (e) {
+      // Ignore Google sign out errors - user might not be signed in
+    }
+    
     state = AuthState();
     
     final prefs = await SharedPreferences.getInstance();

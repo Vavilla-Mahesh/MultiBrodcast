@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../services/auth_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -16,6 +17,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _passwordVisible = false;
+
+  // Configure Google Sign In for YouTube OAuth
+  // Note: In production, configure these scopes and client ID properly
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: [
+      'https://www.googleapis.com/auth/youtube',
+      'https://www.googleapis.com/auth/youtube.force-ssl',
+    ],
+  );
 
   @override
   void initState() {
@@ -88,6 +98,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
+              'You can connect any Google account with YouTube access, not necessarily the same email used for local login.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
               'This will redirect you to Google\'s authorization page.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
               textAlign: TextAlign.center,
@@ -105,7 +121,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _simulateGoogleOAuth();
+              _performGoogleOAuth();
             },
             child: const Text('Connect YouTube'),
           ),
@@ -114,9 +130,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  // Simulate Google OAuth for demo purposes
-  // In a real app, this would use google_sign_in package
-  Future<void> _simulateGoogleOAuth() async {
+  // Real Google OAuth implementation
+  // This allows users to sign in with any Google account, independent of their local login email
+  Future<void> _performGoogleOAuth() async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -127,35 +143,97 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             CircularProgressIndicator(),
             SizedBox(height: 16),
             Text('Connecting to YouTube...'),
+            SizedBox(height: 8),
+            Text(
+              'You can use any Google account, not necessarily the same as your local login.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
     );
 
-    // Simulate OAuth delay
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // Sign out first to ensure user can choose any account
+      await _googleSignIn.signOut();
+      
+      // Perform Google OAuth - this will show account picker
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        // User cancelled the sign-in
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sign-in was cancelled'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
 
-    final success = await ref.read(authServiceProvider.notifier).exchangeGoogleTokens(
-      accessToken: 'demo_access_token',
-      refreshToken: 'demo_refresh_token',
-      expiryDate: DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch,
-      channelId: 'UC_demo_channel_id',
-      channelTitle: 'Demo YouTube Channel',
-      scopes: [
-        'https://www.googleapis.com/auth/youtube',
-        'https://www.googleapis.com/auth/youtube.force-ssl',
-      ],
-    );
+      // Get authentication details
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      
+      // Get access token and other details
+      final String? accessToken = googleAuth.accessToken;
+      final String? refreshToken = googleAuth.refreshToken;
+      
+      if (accessToken == null) {
+        Navigator.of(context).pop(); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to get access token'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
 
-    Navigator.of(context).pop(); // Close loading dialog
+      // For YouTube, we need to get the channel information
+      // Using the user's display name and ID as channel info for demo
+      // In production, you'd call YouTube API to get actual channel details
+      final String channelId = 'UC_${googleUser.id}'; // Simulated channel ID
+      final String channelTitle = googleUser.displayName ?? 'Unknown Channel';
 
-    if (success) {
-      context.go('/home');
-    } else {
-      final error = ref.read(authServiceProvider).error;
+      final success = await ref.read(authServiceProvider.notifier).exchangeGoogleTokens(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        expiryDate: googleAuth.accessTokenExpirationDate?.millisecondsSinceEpoch,
+        channelId: channelId,
+        channelTitle: channelTitle,
+        scopes: [
+          'https://www.googleapis.com/auth/youtube',
+          'https://www.googleapis.com/auth/youtube.force-ssl',
+        ],
+      );
+
+      Navigator.of(context).pop(); // Close loading dialog
+
+      if (success) {
+        // Show success message with the Google account used
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully connected YouTube account: ${googleUser.email}'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        context.go('/home');
+      } else {
+        final error = ref.read(authServiceProvider).error;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error ?? 'Failed to connect YouTube account'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.of(context).pop(); // Close loading dialog
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error ?? 'Failed to connect YouTube account'),
+          content: Text('OAuth error: $e'),
           backgroundColor: Colors.red,
         ),
       );
